@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI 用量</title>
+<style>
+:root {
+  color-scheme: light;
+  --surface-0: #f4f3f0; --surface-1: #fcfcfb; --line: #e2e1dc; --grid: #ecebe6;
+  --text-primary: #0b0b0b; --text-secondary: #52514e; --text-muted: #6f6e69;
+  --series-1: #2a78d6; --series-2: #eb6834;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --surface-0: #111110; --surface-1: #1a1a19; --line: #33322f; --grid: #2a2927;
+    --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #a09f96;
+    --series-1: #3987e5; --series-2: #d95926;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--surface-0); color: var(--text-primary);
+  font: 15px/1.5 "Segoe UI", "Microsoft JhengHei", system-ui, sans-serif; }
+main { max-width: 1080px; margin: 0 auto; padding: 24px 16px 40px; }
+header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 4px 16px; margin-bottom: 16px; }
+h1 { font-size: 22px; margin: 0; }
+h2 { font-size: 16px; margin: 0; }
+.muted { color: var(--text-muted); font-size: 13px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 12px; margin-bottom: 12px; }
+.card { background: var(--surface-1); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+.tile .label { color: var(--text-secondary); font-size: 13px; }
+.tile .value { font-size: 32px; font-weight: 600; line-height: 1.25; font-variant-numeric: tabular-nums; }
+.tile .note { color: var(--text-muted); font-size: 13px; }
+.chart { margin-bottom: 12px; min-width: 0; }
+.pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 12px; }
+.chart-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 16px; margin-bottom: 8px; }
+.legend { display: flex; gap: 16px; color: var(--text-secondary); font-size: 13px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+.plot { position: relative; }
+svg { display: block; width: 100%; touch-action: pan-y; }
+svg text { fill: var(--text-muted); font-size: 12px; }
+#tip { position: fixed; display: none; pointer-events: none; z-index: 5; background: var(--surface-1);
+  border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: 13px;
+  box-shadow: 0 4px 14px rgba(0,0,0,.18); min-width: 150px; }
+#tip .row { display: flex; align-items: center; gap: 8px; }
+#tip b { font-variant-numeric: tabular-nums; }
+#tip i { width: 12px; height: 3px; border-radius: 2px; }
+details { margin-top: 12px; }
+summary { cursor: pointer; color: var(--text-secondary); font-size: 13px; }
+table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13px; font-variant-numeric: tabular-nums; }
+th, td { text-align: right; padding: 4px 8px; border-bottom: 1px solid var(--line); }
+th:first-child, td:first-child { text-align: left; }
+.foot { margin-top: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>AI 用量</h1>
+    <div class="muted" id="status" aria-live="polite">載入中…</div>
+  </header>
+  <section class="tiles" id="tiles"></section>
+  <div class="pair">
+    <section class="card chart">
+      <div class="chart-head">
+        <h2>Codex 額度已用比例（今天）</h2>
+        <div class="legend"><span><i style="background:var(--series-1)"></i>5 小時</span><span><i style="background:var(--series-2)"></i>7 天</span></div>
+      </div>
+      <div class="plot" id="line"></div>
+    </section>
+    <section class="card chart">
+      <div class="chart-head">
+        <h2>Claude Code 額度已用比例（今天）</h2>
+        <div class="legend"><span><i style="background:var(--series-1)"></i>5 小時</span><span><i style="background:var(--series-2)"></i>7 天</span></div>
+      </div>
+      <div class="plot" id="lineClaude"></div>
+    </section>
+  </div>
+  <section class="card chart">
+    <div class="chart-head">
+      <h2>每小時新處理 tokens（今天）</h2>
+      <div class="legend"><span><i style="background:var(--series-1)"></i>Codex</span><span><i style="background:var(--series-2)"></i>Claude Code</span></div>
+    </div>
+    <div class="plot" id="bars"></div>
+    <details><summary>查看每小時數字</summary><table><thead><tr><th>時段</th><th>Codex</th><th>Claude Code</th></tr></thead><tbody id="rows"></tbody></table></details>
+  </section>
+  <p class="muted foot">資料來自本機紀錄。Codex 額度在 Codex 執行時更新；Claude Code 額度由狀態列回報，只有 Claude Code 開著時才會記錄，走勢從開始記錄後才有。tokens 已排除快取讀取，只算未快取輸入與輸出。</p>
+</main>
+<div id="tip" role="status"></div>
+<script>
+const $ = (id) => document.getElementById(id);
+const NS = 'http://www.w3.org/2000/svg';
+const hm = (t) => new Date(t).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false });
+const dayhm = (t) => new Date(t).toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+const fmt = (n) => n >= 1e6 ? (n / 1e6).toFixed(2) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'K' : String(n);
+let data = null;
+
+function el(name, attrs, parent) {
+  const e = document.createElementNS(NS, name);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function label(svg, x, y, text, anchor) {
+  const t = el('text', { x, y, 'text-anchor': anchor || 'middle' }, svg);
+  t.textContent = text;
+}
+function tile(label, value, note) {
+  const d = document.createElement('div');
+  d.className = 'card tile';
+  [['label', label], ['value', value], ['note', note]].forEach(([c, s]) => {
+    const n = document.createElement('div');
+    n.className = c; n.textContent = s; d.appendChild(n);
+  });
+  return d;
+}
+function showTip(ev, title, rows) {
+  const tip = $('tip');
+  tip.replaceChildren();
+  const h = document.createElement('div');
+  h.className = 'muted'; h.textContent = title; tip.appendChild(h);
+  rows.forEach(([color, value, name]) => {
+    const r = document.createElement('div');
+    r.className = 'row';
+    const i = document.createElement('i'); i.style.background = color;
+    const b = document.createElement('b'); b.textContent = value;
+    const s = document.createElement('span'); s.textContent = name;
+    r.append(i, b, s); tip.appendChild(r);
+  });
+  tip.style.display = 'block';
+  const w = tip.offsetWidth, hgt = tip.offsetHeight;
+  tip.style.left = Math.max(8, Math.min(ev.clientX + 14, innerWidth - w - 8)) + 'px';
+  tip.style.top = Math.max(8, Math.min(ev.clientY - hgt - 10, innerHeight - hgt - 8)) + 'px';
+}
+const hideTip = () => { $('tip').style.display = 'none'; };
+
+function renderTiles(d) {
+  const box = $('tiles');
+  box.replaceChildren();
+  const last = d.points[d.points.length - 1];
+  const lastClaude = d.claudePoints[d.claudePoints.length - 1];
+  const quota = (name, p, key, resetKey, label) => {
+    if (!p || p[key] == null) return tile(name + ' ' + label + '額度已用', '—', '今天還沒有紀錄');
+    const expired = p[resetKey] && p[resetKey] <= Date.now();
+    const near = !expired && p[key] >= 90;
+    return tile(name + ' ' + label + '額度已用', expired ? '0%' : Math.round(p[key]) + '%',
+      expired ? '視窗已重置，等下次回報' : (near ? '⚠ 接近上限・' : '') + dayhm(p[resetKey]) + ' 重置');
+  };
+  const totalCodex = d.hours.reduce((s, h) => s + h.codex, 0);
+  const totalClaude = d.hours.reduce((s, h) => s + h.claude, 0);
+  box.append(quota('Codex', last, 'p5', 'r5', '5 小時'), quota('Codex', last, 'p7', 'r7', '7 天'),
+    tile('Codex 今日 tokens', fmt(totalCodex), '未快取輸入＋輸出'));
+  box.append(quota('Claude Code', lastClaude, 'p5', 'r5', '5 小時'), quota('Claude Code', lastClaude, 'p7', 'r7', '7 天'),
+    tile('Claude Code 今日 tokens', fmt(totalClaude), '未快取輸入＋輸出'));
+  const age = Date.now() - d.now;
+  $('status').textContent = (age > 600000 ? '⚠ 電腦可能已關機，資料停在 ' + dayhm(d.now) : '資料時間 ' + hm(d.now))
+    + (last ? '・Codex 最後回報 ' + hm(last.t) : '')
+    + (lastClaude ? '・Claude 最後回報 ' + hm(lastClaude.t) : '');
+}
+
+function renderLine(d, id, pts, emptyText) {
+  const box = $(id);
+  box.replaceChildren();
+  const W = box.clientWidth, H = 260, L = 40, R = 16, T = 12, B = 26;
+  const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, height: H, role: 'img', 'aria-label': '額度已用比例折線圖' }, box);
+  const t0 = pts.length ? Math.max(d.since, pts[0].t - 1800e3) : d.since;
+  const t1 = Math.max(d.now, t0 + 3600e3);
+  const x = (t) => L + (t - t0) / (t1 - t0) * (W - L - R);
+  const y = (p) => T + (100 - p) / 100 * (H - T - B);
+  [0, 25, 50, 75, 100].forEach((p) => {
+    el('line', { x1: L, x2: W - R, y1: y(p), y2: y(p), stroke: 'var(--grid)' }, svg);
+    label(svg, L - 6, y(p) + 4, p + '%', 'end');
+  });
+  const ticks = Math.max(2, Math.min(6, Math.floor((W - L - R) / 110)));
+  for (let i = 0; i <= ticks; i++) {
+    const t = t0 + (t1 - t0) * i / ticks;
+    label(svg, x(t), H - 8, hm(t), i === 0 ? 'start' : i === ticks ? 'end' : 'middle');
+  }
+  if (!pts.length) { label(svg, W / 2, H / 2, emptyText); return; }
+
+  const draw = (key, group, color) => {
+    let seg = [], prev;
+    const flush = () => {
+      if (!seg.length) return;
+      if (seg.length === 1) el('circle', { cx: x(seg[0].t), cy: y(seg[0][key]), r: 4, fill: color }, svg);
+      else el('path', { d: seg.map((p, i) => (i ? 'L' : 'M') + x(p.t).toFixed(1) + ' ' + y(p[key]).toFixed(1)).join(''),
+        fill: 'none', stroke: color, 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }, svg);
+      seg = [];
+    };
+    for (const p of pts) {
+      if (p[key] == null) continue;
+      if (prev !== undefined && p[group] !== prev) flush();
+      seg.push(p); prev = p[group];
+    }
+    flush();
+    const end = [...pts].reverse().find((p) => p[key] != null);
+    if (end) el('circle', { cx: x(end.t), cy: y(end[key]), r: 4, fill: color, stroke: 'var(--surface-1)', 'stroke-width': 2 }, svg);
+  };
+  draw('p7', 'r7', 'var(--series-2)');
+  draw('p5', 'r5', 'var(--series-1)');
+
+  const hair = el('line', { y1: T, y2: H - B, stroke: 'var(--text-muted)', visibility: 'hidden' }, svg);
+  const hit = el('rect', { x: L, y: T, width: W - L - R, height: H - T - B, fill: 'transparent' }, svg);
+  hit.addEventListener('pointermove', (ev) => {
+    const r = svg.getBoundingClientRect();
+    const px = (ev.clientX - r.left) * (W / r.width);
+    let best = pts[0];
+    for (const p of pts) if (Math.abs(x(p.t) - px) < Math.abs(x(best.t) - px)) best = p;
+    hair.setAttribute('x1', x(best.t)); hair.setAttribute('x2', x(best.t)); hair.setAttribute('visibility', 'visible');
+    showTip(ev, hm(best.t), [['var(--series-1)', best.p5 == null ? '—' : Math.round(best.p5) + '%', '5 小時額度'],
+      ['var(--series-2)', best.p7 == null ? '—' : Math.round(best.p7) + '%', '7 天額度']]);
+  });
+  hit.addEventListener('pointerleave', () => { hair.setAttribute('visibility', 'hidden'); hideTip(); });
+}
+
+function niceMax(v) {
+  if (v <= 0) return 1000;
+  const m = Math.pow(10, Math.floor(Math.log10(v)));
+  for (const s of [1, 2, 4, 5, 8, 10]) if (s * m >= v) return s * m;
+  return 10 * m;
+}
+
+function renderBars(d) {
+  const box = $('bars');
+  box.replaceChildren();
+  const W = box.clientWidth, H = 240, L = 52, R = 8, T = 12, B = 26;
+  const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, height: H, role: 'img', 'aria-label': '每小時 tokens 堆疊長條圖' }, box);
+  const cur = new Date(d.now).getHours();
+  const hours = d.hours.slice(0, cur + 1);
+  const firstUsed = hours.findIndex((h) => h.codex + h.claude > 0);
+  const shown = firstUsed < 0 ? hours : hours.slice(Math.max(0, firstUsed - 1));
+  const max = niceMax(Math.max(...shown.map((h) => h.codex + h.claude), 1));
+  const y = (v) => T + (1 - v / max) * (H - T - B);
+  [0, .25, .5, .75, 1].forEach((f) => {
+    el('line', { x1: L, x2: W - R, y1: y(max * f), y2: y(max * f), stroke: 'var(--grid)' }, svg);
+    label(svg, L - 6, y(max * f) + 4, fmt(max * f), 'end');
+  });
+  const band = (W - L - R) / shown.length;
+  const bw = Math.min(28, band * .6);
+  const every = Math.ceil(36 / band);
+  shown.forEach((h, i) => {
+    const cx = L + band * i + band / 2;
+    if (i % every === 0) label(svg, cx, H - 8, h.h + '時');
+    const base = y(0);
+    const hC = base - y(h.codex), hL = base - y(h.claude);
+    const gap = h.codex && h.claude ? 2 : 0;
+    if (h.codex) el('rect', { x: cx - bw / 2, y: base - hC, width: bw, height: Math.max(1, hC), fill: 'var(--series-1)', rx: h.claude ? 0 : 4 }, svg);
+    if (h.claude) el('rect', { x: cx - bw / 2, y: base - hC - hL - gap, width: bw, height: Math.max(1, hL), fill: 'var(--series-2)', rx: 4 }, svg);
+    const hit = el('rect', { x: cx - band / 2, y: T, width: band, height: H - T - B, fill: 'transparent' }, svg);
+    hit.addEventListener('pointermove', (ev) => showTip(ev, h.h + ':00–' + h.h + ':59',
+      [['var(--series-1)', fmt(h.codex), 'Codex'], ['var(--series-2)', fmt(h.claude), 'Claude Code']]));
+    hit.addEventListener('pointerleave', hideTip);
+  });
+  const rows = $('rows');
+  rows.replaceChildren();
+  shown.forEach((h) => {
+    const tr = document.createElement('tr');
+    [h.h + ':00', fmt(h.codex), fmt(h.claude)].forEach((s) => {
+      const td = document.createElement('td'); td.textContent = s; tr.appendChild(td);
+    });
+    rows.appendChild(tr);
+  });
+}
+
+function render() {
+  if (!data) return;
+  renderTiles(data);
+  renderLine(data, 'line', data.points, '今天還沒有 Codex 額度紀錄');
+  renderLine(data, 'lineClaude', data.claudePoints, '等待 Claude Code 回報額度');
+  renderBars(data);
+}
+const gist = /^[0-9a-f]{32}$/.test(location.hash.slice(1)) ? location.hash.slice(1) : null;
+const REFRESH = gist ? 120000 : 15000;
+async function load() {
+  if (!gist) return (await fetch('/data', { cache: 'no-store' })).json();
+  const api = await fetch('https://api.github.com/gists/' + gist, { cache: 'no-store' });
+  if (api.ok) return JSON.parse((await api.json()).files['usage.json'].content);
+  const raw = await fetch('https://gist.githubusercontent.com/hacket2062/' + gist + '/raw/usage.json?t=' + Date.now());
+  if (!raw.ok) throw new Error('load failed');
+  return raw.json();
+}
+async function tick() {
+  try {
+    data = await load();
+    render();
+  } catch {
+    $('status').textContent = '⚠ 讀不到資料，畫面停在上次的內容';
+  }
+}
+addEventListener('resize', render);
+tick();
+setInterval(tick, REFRESH);
+</script>
+</body>
+</html>
