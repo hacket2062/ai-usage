@@ -23,7 +23,13 @@
 body { margin: 0; background: var(--surface-0); color: var(--text-primary);
   font: 15px/1.5 "Segoe UI", "Microsoft JhengHei", system-ui, sans-serif; }
 main { max-width: 1080px; margin: 0 auto; padding: 24px 16px 40px; }
-header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 4px 16px; margin-bottom: 16px; }
+header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 4px 16px; margin-bottom: 16px; }
+.head-side { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+#refresh { font: inherit; font-size: 13px; min-height: 36px; padding: 0 14px; color: var(--text-primary);
+  background: var(--surface-1); border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
+#refresh:hover:not(:disabled) { border-color: var(--text-muted); }
+#refresh:disabled { color: var(--text-muted); cursor: default; }
+#refresh:focus-visible { outline: 2px solid var(--series-1); outline-offset: 2px; }
 h1 { font-size: 22px; margin: 0; }
 h2 { font-size: 16px; margin: 0; }
 .muted { color: var(--text-muted); font-size: 13px; }
@@ -59,7 +65,10 @@ th:first-child, td:first-child { text-align: left; }
 <main>
   <header>
     <h1>AI 用量</h1>
-    <div class="muted" id="status" aria-live="polite">載入中…</div>
+    <div class="head-side">
+      <div class="muted" id="status" aria-live="polite">載入中…</div>
+      <button type="button" id="refresh">更新</button>
+    </div>
   </header>
   <section class="tiles" id="tiles"></section>
   <div class="pair">
@@ -86,7 +95,7 @@ th:first-child, td:first-child { text-align: left; }
     <div class="plot" id="bars"></div>
     <details><summary>查看每小時數字</summary><table><thead><tr><th>時段</th><th>Codex</th><th>Claude Code</th></tr></thead><tbody id="rows"></tbody></table></details>
   </section>
-  <p class="muted foot">資料來自本機紀錄。Codex 額度在 Codex 執行時更新；Claude Code 額度由狀態列回報，只有 Claude Code 開著時才會記錄，走勢從開始記錄後才有。tokens 已排除快取讀取，只算未快取輸入與輸出。</p>
+  <p class="muted foot">頁面每 5 分鐘自動更新，也可以按「更新」立即抓取。電腦每 2 分鐘上傳一次，關機或睡眠時資料不會變。資料來自本機紀錄。Codex 額度在 Codex 執行時更新；Claude Code 額度由狀態列回報，只有 Claude Code 開著時才會記錄，走勢從開始記錄後才有。tokens 已排除快取讀取，只算未快取輸入與輸出。</p>
 </main>
 <div id="tip" role="status"></div>
 <script>
@@ -157,7 +166,8 @@ function renderTiles(d) {
   const age = Date.now() - d.now;
   $('status').textContent = (age > 600000 ? '⚠ 電腦可能已關機，資料停在 ' + dayhm(d.now) : '資料時間 ' + hm(d.now))
     + (last ? '・Codex 最後回報 ' + hm(last.t) : '')
-    + (lastClaude ? '・Claude 最後回報 ' + hm(lastClaude.t) : '');
+    + (lastClaude ? '・Claude 最後回報 ' + hm(lastClaude.t) : '')
+    + '・已檢查 ' + hm(lastCheck);
 }
 
 function renderLine(d, id, pts, emptyText) {
@@ -272,26 +282,44 @@ function render() {
   renderBars(data);
 }
 const gist = /^[0-9a-f]{32}$/.test(location.hash.slice(1)) ? location.hash.slice(1) : null;
-const REFRESH = gist ? 120000 : 15000;
+const REFRESH = 5 * 60 * 1000;
+const fetchOpts = () => ({ cache: 'no-store', signal: AbortSignal.timeout(15000) });
+let lastCheck = 0, timer, busy = false;
 async function load() {
-  if (!gist) return (await fetch('/data', { cache: 'no-store' })).json();
-  const api = await fetch('https://api.github.com/gists/' + gist, { cache: 'no-store' });
+  if (!gist) return (await fetch('/data', fetchOpts())).json();
+  const api = await fetch('https://api.github.com/gists/' + gist, fetchOpts());
   if (api.ok) return JSON.parse((await api.json()).files['usage.json'].content);
-  const raw = await fetch('https://gist.githubusercontent.com/hacket2062/' + gist + '/raw/usage.json?t=' + Date.now());
+  const raw = await fetch('https://gist.githubusercontent.com/hacket2062/' + gist + '/raw/usage.json?t=' + Date.now(), fetchOpts());
   if (!raw.ok) throw new Error('load failed');
   return raw.json();
 }
 async function tick() {
+  if (busy) return;
+  busy = true;
+  clearTimeout(timer);
+  const btn = $('refresh');
+  btn.disabled = true;
+  btn.textContent = '更新中…';
   try {
     data = await load();
+    lastCheck = Date.now();
     render();
   } catch {
-    $('status').textContent = '⚠ 讀不到資料，畫面停在上次的內容';
+    $('status').textContent = '⚠ ' + hm(Date.now()) + ' 更新失敗，畫面停在上次的內容';
+  } finally {
+    busy = false;
+    btn.disabled = false;
+    btn.textContent = '更新';
+    timer = setTimeout(tick, REFRESH);
   }
 }
 addEventListener('resize', render);
+$('refresh').addEventListener('click', tick);
+// Phones pause timers in the background, so catch up when the page comes back.
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && Date.now() - lastCheck >= REFRESH) tick();
+});
 tick();
-setInterval(tick, REFRESH);
 </script>
 </body>
 </html>
