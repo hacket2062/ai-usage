@@ -95,7 +95,7 @@ th:first-child, td:first-child { text-align: left; }
     <div class="plot" id="bars"></div>
     <details><summary>查看每小時數字</summary><table><thead><tr><th>時段</th><th>Codex</th><th>Claude Code</th></tr></thead><tbody id="rows"></tbody></table></details>
   </section>
-  <p class="muted foot">頁面每 30 分鐘自動更新，也可以按「更新」立即抓取。電腦每 2 分鐘上傳一次，關機或睡眠時資料不會變。資料來自本機紀錄。Codex 額度在 Codex 執行時更新；Claude Code 額度由狀態列回報，只有 Claude Code 開著時才會記錄，走勢從開始記錄後才有。tokens 已排除快取讀取，只算未快取輸入與輸出。</p>
+  <p class="muted foot">頁面每 30 分鐘自動更新，也可以按「更新」立即抓取。電腦每 2 分鐘上傳一次，關機或睡眠時資料不會變。資料來自本機紀錄。Codex 額度在 Codex 執行時更新；Claude Code 額度每 30 分鐘查詢一次，走勢從開始記錄後才有。tokens 已排除快取讀取，只算未快取輸入與輸出。</p>
 </main>
 <div id="tip" role="status"></div>
 <script>
@@ -155,7 +155,7 @@ function renderTiles(d) {
     const expired = p[resetKey] && p[resetKey] <= Date.now();
     const near = !expired && p[key] >= 90;
     return tile(name + ' ' + label + '額度已用', expired ? '0%' : Math.round(p[key]) + '%',
-      expired ? '視窗已重置，等下次回報' : (near ? '⚠ 接近上限・' : '') + dayhm(p[resetKey]) + ' 重置');
+      expired ? '視窗已重置，等下次回報' : (near ? '⚠ 接近上限・' : '') + (p[resetKey] ? dayhm(p[resetKey]) + ' 重置' : '尚未開始計時'));
   };
   const totalCodex = d.hours.reduce((s, h) => s + h.codex, 0);
   const totalClaude = d.hours.reduce((s, h) => s + h.claude, 0);
